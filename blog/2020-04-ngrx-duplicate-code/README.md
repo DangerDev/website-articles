@@ -13,11 +13,11 @@ thumbnail: xxx.jpg
 I have noticed more than once that it can easily happen that duplicated code occurs in an architecture with NgRx. 
 In this post I want to highlight a few ideas that helped me working with NgRx/Redux. 
 
-## The starting point
+## A regular app – Our starting point
 
 I work under the assumption that redundant code is acceptable up to a certain limit. If we are over-engineer into the wrong direction and immediately choose a generic solution, that generic solution may be worse than the original problem. So if you have two similar actions, then this is not a problem for me. Therefore I use the following example: Our application has to load data, and we need a loading indication and we want to display the last error in case of an error. Unfortunately we already have altered the existing code **three times**...
 
-**Our actions:**
+### Our actions
 
 ```ts
 export const loadBooks = createAction(
@@ -67,7 +67,7 @@ export const loadThumbnailsFailure = createAction(
 );
 ```
 
-**Our reducers:**
+### Our reducers
 
 I know it's horrible to read, but we have to go through it now.
 
@@ -157,7 +157,7 @@ export const reducer = createReducer(
 );
 ```
 
-**Our effects:**
+### Our effects
 
 
 As for effects, the amount of lines is tolerable, but duplicated code is still duplicated code.
@@ -197,7 +197,7 @@ export class BookEffects {
 }
 ```
 
-**Our selects:**
+### Our selects
 
 Let's finish the example, of course our selectors are also redundant:
 
@@ -243,6 +243,282 @@ export const selectAuthorsError = createSelector(
 // [...]
 ```
 
-## Conclusion
+### Conclusion
 
 Okay, it should all be clear. This cannot go on. We should find solutions to reduce the amount of lines of code!
+
+
+## 1. First Idea: Combining reducers and effects
+
+Mike Ryan, a well-known core developer of NgRx, recommends having explicit actions in the code. He even goes further by not reusing actions at all. The best way to find out more about this is to listen to the great talk ["Good Action Hygiene with NgRx"](https://youtu.be/JmnsEvoy-gY). He teaches that its principially a good practice to have unique actions for every component. Please have a look at this stream of actions:
+
+```ts
+// not that great 🤨
+[Book] Load Books
+[Book] Load Books Success
+[Book] Load Books
+[Book] Load Books Failure
+```
+
+And instead of this, compare the following stream:
+
+```ts
+// much more explicit 🤩
+[Book List]    Load Books
+[Book API]     Load Books Success
+[Book Details] Load Books
+[Book API]     Load Books Failure
+```
+
+In the second example it is much easier to understand from which source the action was dispatched. NgRx is designed to support this style very well. So it accepts multiple actions as arguments for both reducers and effects:
+
+```ts
+// reducer
+on(BookActions.loadBooksList
+   BookActions.loadBooksDetails, state => ({
+  ...state,
+  booksStatus: Status.Submitting,
+})),
+
+// effects
+loadBooks$ = createEffect(() => {
+  return this.actions$.pipe(
+    ofType(BookActions.loadBooksList,
+           BookActions.loadBooksDetails),
+    concatMap(() =>
+      this.service.getBooks().pipe(
+        map(data => BookActions.loadBooksSuccess({ data })),
+        catchError(error => of(BookActions.loadBooksFailure({ error }))))
+    )
+  );
+});
+```
+
+
+
+This idea can be adopted. Let’s see how it looks like to use the same technique for independet actions. Instead of nine reducer creators we could use three creators to handle all cases:
+
+```ts
+export const reducer = createReducer(
+  initialState,
+
+  on(BookActions.loadBooks,
+     BookActions.loadAuthors,
+     BookActions.loadThumbnails, (state, { type }) => ({
+    ...state,
+    ...(type === BookActions.loadBooks.type      ? { booksStatus:      Status.Submitting } : {}),
+    ...(type === BookActions.loadAuthors.type    ? { authorsStatus:    Status.Submitting } : {}),
+    ...(type === BookActions.loadThumbnails.type ? { thumbnailsStatus: Status.Submitting } : {})
+  })),
+
+  on(BookActions.loadBooksSuccess,
+     BookActions.loadAuthorsSuccess,
+     BookActions.loadThumbnailsSuccess, (state, { type, data }) => ({
+    ...state,
+
+    ...(type === BookActions.loadBooksSuccess.type ? {
+      books: data,
+      booksStatus: Status.Successful,
+      booksError: undefined
+    } : {}),
+
+    // still some kind of second duplication 🤨
+
+    ...(type === BookActions.loadAuthorsSuccess.type ? {
+      authors: data,
+      authorsStatus: Status.Successful,
+      authorsError: undefined
+    } : {}),
+
+      // still some kind of third duplication 😞
+
+    ...(type === BookActions.loadThumbnailsSuccess.type ? {
+      thumbnails: data,
+      thumbnailsStatus: Status.Successful,
+      thumbnailsError: undefined
+    } : {})
+  })),
+
+  on(BookActions.loadBooksFailure,
+     BookActions.loadAuthorsFailure,
+     BookActions.loadThumbnailsFailure, (state, { type, error }) => ({
+    ...state,
+
+    ...(type === BookActions.loadBooksFailure.type ? {
+      books: [],
+      booksStatus: Status.Failure,
+      booksError: error
+    } : {}),
+
+    ...(type === BookActions.loadAuthorsFailure.type ? {
+      authors: [],
+      authorsStatus: Status.Failure,
+      authorsError: error
+    } : {}),
+
+    ...(type === BookActions.loadThumbnailsFailure.type ? {
+      thumbnails: [],
+      thumbnailsStatus: Status.Failure,
+      thumbnailsError: error
+    } : {})
+  }))
+);
+```
+
+We can do the same for the effects. Instead of three effects, we can also use only one, but this one will still need some branches to handle to different cases:
+
+```ts
+@Injectable()
+export class BookEffects {
+
+  loadItems$ = createEffect(() => {
+    return this.actions$.pipe(
+      ofType(BookActions.loadBooks,
+             BookActions.loadAuthors,
+             BookActions.loadThumbnails),
+      concatMap(({ type }) => defer(() => {
+        switch (type) {
+          case BookActions.loadBooks.type: return this.service.getBooks();
+          case BookActions.loadAuthors.type: return this.service.getAuthors();
+          case BookActions.loadThumbnails.type: return this.service.getThumbnails();
+        }}).pipe(
+          map((data: any) => {
+            switch (type) {
+              case BookActions.loadBooks.type: return BookActions.loadBooksSuccess({ data });
+              case BookActions.loadAuthors.type: return BookActions.loadAuthorsSuccess({ data });
+              case BookActions.loadThumbnails.type: return BookActions.loadThumbnailsSuccess({ data });
+            }
+          }),
+          catchError(error => {
+            switch (type) {
+              case BookActions.loadBooks.type: return of(BookActions.loadBooksFailure({ error }));
+              case BookActions.loadAuthors.type: return of(BookActions.loadAuthorsFailure({ error }));
+              case BookActions.loadThumbnails.type: return of(BookActions.loadThumbnailsFailure({ error }));
+            }
+          })
+      ))
+    );
+  });
+
+  constructor(private actions$: Actions, private service: DataService) { }
+}
+```
+
+### Conclusion
+
+We see that this works in principle. But the number of lines of code is about the same and we just moved the complexity into the functions. In the end, we still have nine cases for the reducers and selectors. If you have looked carefully, you will have noticed that I used `any` at one point. In fact, it is not so easy to remain type-safe over the whole time. Another important point is that with this technique we can not cross the boundaries of a NgRx feature. 
+
+Let's try it another varriation!
+
+
+## 2. Second Idea: Action Subtyping
+
+Explicit actions are a fine thing, but we are getting a lot of lines of code. Now we want to do **exactly the opposite** and fight the duplicated code by using a generic action, or to be specific: an action with a subtype. And we are aware that the folowing example can be seen as anti-pattern.
+
+Such actions could look like this:
+
+```ts
+export type ActionKinds = 'books' | 'authors' | 'thumbnails';
+
+export const loadItems = createAction(
+  '[Book] Load Items',
+  props<{ kind: ActionKinds }>()
+);
+export const loadItemsSuccess = createAction(
+  '[Book] Load Items Success',
+  props<{ kind: ActionKinds, data: Book[] | string[] }>()
+);
+export const loadItemsFailure = createAction(
+  '[Book] Load Items Failure',
+  props<{ kind: ActionKinds, error: HttpErrorResponse }>()
+);
+```
+
+One thing is quite obvious. We have fewer actions and therefore no more duplicated code at this place.
+We can adapt the previously used reducer accordingly:
+
+```ts
+export const reducer = createReducer(
+  initialState,
+
+  on(BookActions.loadItems, (state, { kind }) => ({
+    ...state,
+    ...(kind === 'books' ? { booksStatus: Status.Submitting } : {}),
+    ...(kind === 'authors' ? { authorsStatus: Status.Submitting } : {}),
+    ...(kind === 'thumbnails' ? { thumbnailsStatus: Status.Submitting } : {})
+  })),
+
+  on(BookActions.loadItemsSuccess, (state, { kind, data }) => ({
+    ...state,
+
+    ...(kind === 'books' ? {
+      books: data,
+      booksStatus: Status.Successful,
+      booksError: undefined
+    } : {}),
+
+    ...(kind === 'authors' ? {
+      authors: data,
+      authorsStatus: Status.Successful,
+      authorsError: undefined
+    } : {}),
+
+    ...(kind === 'thumbnails' ? {
+      thumbnails: data,
+      thumbnailsStatus: Status.Successful,
+      thumbnailsError: undefined
+    } : {})
+  })),
+
+  on(BookActions.loadItemsFailure, (state, { kind, error }) => ({
+    ...state,
+
+    ...(kind === 'books' ? {
+      books: [],
+      booksStatus: Status.Failure,
+      booksError: error
+    } : {}),
+
+    ...(kind === 'authors' ? {
+      authors: [],
+      authorsStatus: Status.Failure,
+      authorsError: error
+    } : {}),
+
+    ...(kind === 'thumbnails' ? {
+      thumbnails: [],
+      thumbnailsStatus: Status.Failure,
+      thumbnailsError: error
+    } : {})
+  }))
+);
+```
+
+Okay, that's at least a little bit shorter now. <!--  but we have also lost some type safety by using the magic strings `book`, `authors` and `thumbnails`. -->
+The biggest gain we have with the effect, here you can now remove some lines:
+
+```ts
+@Injectable()
+export class BookEffects {
+
+  loadItems$ = createEffect(() => {
+    return this.actions$.pipe(
+      ofType(BookActions.loadItems),
+      concatMap(({ kind }) => defer(() => {
+        switch (kind) {
+          case 'books': return this.service.getBooks();
+          case 'authors': return this.service.getAuthors();
+          case 'thumbnails': return this.service.getThumbnails();
+        }}).pipe(
+          map((data) => BookActions.loadItemsSuccess({ kind, data })),
+          catchError(error => of(BookActions.loadItemsFailure({ kind, error })))
+      ))
+    );
+  });
+
+  constructor(private actions$: Actions, private service: DataService) {}
+}
+```
+
+Yeah, it's worth it here. The complexity is much smaller than before.
+But we have to be aware that the stream of actions ([Redux DevTools](https://chrome.google.com/webstore/detail/redux-devtools/lmhkpmbekcpmknklioeibfkpmmfibljd)) is hard to read because all action have the same type.
