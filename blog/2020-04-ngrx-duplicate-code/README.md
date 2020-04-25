@@ -82,15 +82,15 @@ export enum Status {
 export interface State {
   books: Book[];
   booksStatus: Status;
-  booksError: HttpErrorResponse | undefined;
+  booksError: HttpErrorResponse;
 
   authors: string[];
   authorsStatus: Status;
-  authorsError: HttpErrorResponse | undefined;
+  authorsError: HttpErrorResponse;
 
   thumbnails: string[];
   thumbnailsStatus: Status;
-  thumbnailsError: HttpErrorResponse | undefined;
+  thumbnailsError: HttpErrorResponse;
 }
 
 export const initialState: State = {
@@ -208,17 +208,17 @@ export const selectBookState = createFeatureSelector<fromBook.State>(
 
 export const selectBooks = createSelector(
   selectBookState,
-  booksState => booksState.books
+  (booksState: fromBook.State) => booksState.books
 );
 
 export const selectBooksStatus = createSelector(
   selectBookState,
-  booksState => booksState.booksStatus
+  (booksState: fromBook.State) => booksState.booksStatus
 );
 
 export const selectBooksError = createSelector(
   selectBookState,
-  booksState => booksState.booksError
+  (booksState: fromBook.State) => booksState.booksError
 );
 
 // second duplication 🤨
@@ -406,14 +406,14 @@ export class BookEffects {
 
 ### Conclusion
 
-We see that this works in principle. But the number of lines of code is about the same and we just moved the complexity into the functions. In the end, we still have nine cases for the reducers and selectors. If you have looked carefully, you will have noticed that I used `any` at one point. In fact, it is not so easy to remain type-safe over the whole time. Another important point is that with this technique we can not cross the boundaries of a NgRx feature. 
+We see that this works in principle. But we can't ignore it, by defintion, we really have way too much actions. Also for the reducer and the effects the number of lines of code is about the same. We just moved the complexity into the inner functions. In the end, we still have nine cases for the reducers and nine cases for the effects. If you have looked carefully, you will have noticed that I used `any` at one point. In fact, it is not so easy to remain type-safe over the whole time. Another important point is that with this technique we can not cross the boundaries of a NgRx feature. 
 
 Let's try it another varriation!
 
 
 ## 2. Second Idea: Action Subtyping
 
-Explicit actions are a fine thing, but we are getting a lot of lines of code. Now we want to do **exactly the opposite** and fight the duplicated code by using a generic action, or to be specific: an action with a subtype. And we are aware that the folowing example can be seen as anti-pattern.
+Explicit actions are a fine thing, but we are getting a lot of lines of code just because we defined so many actions. Now we want to do the opposite and fight the duplicated code by using generic actions, or to be specific: actions with a subtype. And we are aware that the folowing example can be seen as anti-pattern.
 
 Such actions could look like this:
 
@@ -494,8 +494,8 @@ export const reducer = createReducer(
 );
 ```
 
-Okay, that's at least a little bit shorter now. <!--  but we have also lost some type safety by using the magic strings `book`, `authors` and `thumbnails`. -->
-The biggest gain we have with the effect, here you can now remove some lines:
+Okay, that's at least a little bit shorter now, but the result is not that impressive.s
+The biggest gain we have with the effect, here we can now remove some lines:
 
 ```ts
 @Injectable()
@@ -520,5 +520,103 @@ export class BookEffects {
 }
 ```
 
-Yeah, it's worth it here. The complexity is much smaller than before.
-But we have to be aware that the stream of actions ([Redux DevTools](https://chrome.google.com/webstore/detail/redux-devtools/lmhkpmbekcpmknklioeibfkpmmfibljd)) is hard to read because all action have the same type.
+Yeah, the changes are worth it here. The complexity is much smaller than before. But we have to be aware that the stream of actions ([Redux DevTools](https://chrome.google.com/webstore/detail/redux-devtools/lmhkpmbekcpmknklioeibfkpmmfibljd)) is hard to read because all action have the same type. We also have to keep in mind that we still can't reuse the code beetween different NgRx features. 
+
+
+
+## 3. Third Idea: Action Subtyping with nested state
+
+The effects (or more precisely, it's actually only one effect) are very pleasant and short. But how can we make the reducer smaller?
+
+Of course, we can! 😇 An elegant solution is to generalize the state a bit. We could understand the triple of data, status and error object as a separate entity and access it via the ES6 bracket notation `[]`.
+
+```ts
+export interface SubmittableItem<T> {
+  data: T[];
+  status: Status;
+  error: HttpErrorResponse;
+}
+
+const initialSubmittableItem = {
+  data: [],
+  status: Status.NotSubmitted,
+  error: undefined,
+};
+
+export interface State {
+  books: SubmittableItem<Book>;
+  authors: SubmittableItem<string>;
+  thumbnails: SubmittableItem<string>;
+}
+
+export const initialState: State = {
+  books: { ... initialSubmittableItem },
+  authors: { ... initialSubmittableItem },
+  thumbnails: { ... initialSubmittableItem },
+};
+
+
+export const reducer = createReducer(
+  initialState,
+
+  on(BookActions.loadItems, (state, { kind }) => ({
+    ...state,
+    [kind]: {
+      ...state[kind],
+      status: Status.Submitting
+    }
+  })),
+
+  on(BookActions.loadItemsSuccess, (state, { kind, data }) => ({
+    ...state,
+    [kind]: {
+      ...state[kind],
+      data,
+      status: Status.Successful,
+      error: undefined
+    }
+  })),
+
+  on(BookActions.loadItemsFailure, (state, { kind, error }) => ({
+    ...state,
+    [kind]: {
+      ...state[kind],
+      data: [],
+      status: Status.Failure,
+      error
+    }
+  }))
+);
+```
+
+There you go. That looks a lot shorter.<!--  To be fair, it is necessary to mention that TypeScript does not check for types within the bracket notation! -->
+We can now also generilise the selectors:
+
+```ts
+export const selectBookState = createFeatureSelector<fromBook.State>(
+  fromBook.bookFeatureKey
+);
+
+export const selectItems = createSelector(
+  selectBookState,
+  (booksState: fromBook.State, props: { kind: BookActions.ActionKinds }) => booksState[props.kind].data
+);
+
+export const selectItemsStatus = createSelector(
+  selectBookState,
+  (booksState: fromBook.State, props: { kind: BookActions.ActionKinds }) => booksState[props.kind].status
+);
+
+export const selectItemsError = createSelector(
+  selectBookState,
+  (booksState: fromBook.State, props: { kind: BookActions.ActionKinds }) => booksState[props.kind].error
+);
+```
+
+We use the additional object with the name `props`. The usage looks like this:
+
+```ts
+books$ = this.store.select(BookSelectors.selectItems, { kind: 'books'});
+booksStatus$ = this.store.select(BookSelectors.selectItemsStatus, { kind: 'books'});
+booksError$ = this.store.select(BookSelectors.selectItemsError, { kind: 'books'});
+```
