@@ -247,6 +247,8 @@ export const selectAuthorsError = createSelector(
 
 Okay, it should all be clear. This cannot go on. We should find solutions to reduce the amount of lines of code!
 
+**☞ You can find [the full source code of the regular app](https://github.com/angular-schule/ngrx-duplicated-code/tree/master/projects/regular-app) at GitHub.**
+
 
 ## 1. First Idea: Combining reducers and effects
 
@@ -408,6 +410,8 @@ export class BookEffects {
 
 We see that this works in principle. But we can't ignore it, by defintion, we really have way too much actions. Also for the reducer and the effects the number of lines of code is about the same. We just moved the complexity into the inner functions. In the end, we still have nine cases for the reducers and nine cases for the effects. If you have looked carefully, you will have noticed that I used `any` at one point. In fact, it is not so easy to remain type-safe over the whole time. Another important point is that with this technique we can not cross the boundaries of a NgRx feature. 
 
+**☞ You can find [the full source code of this app](https://github.com/angular-schule/ngrx-duplicated-code/tree/master/projects/example-combining) at GitHub.**
+
 Let's try it another varriation!
 
 
@@ -520,19 +524,21 @@ export class BookEffects {
 }
 ```
 
-Yeah, the changes are worth it here. The complexity is much smaller than before. But we have to be aware that the stream of actions ([Redux DevTools](https://chrome.google.com/webstore/detail/redux-devtools/lmhkpmbekcpmknklioeibfkpmmfibljd)) is hard to read because all action have the same type. We also have to keep in mind that we still can't reuse the code beetween different NgRx features. 
+### Conclusion
 
+At least for the effects, the changes are worth it. The complexity is much smaller than before, and we can still handle all casess. But we have to be aware that the stream of actions ([Redux DevTools](https://chrome.google.com/webstore/detail/redux-devtools/lmhkpmbekcpmknklioeibfkpmmfibljd)) is hard to read because all action have the same type. We also have to keep in mind that we still can't reuse the code beetween different NgRx features. 
 
+**☞ You can find [the full source code of this app](https://github.com/angular-schule/ngrx-duplicated-code/tree/master/projects/example-action-subtyping) at GitHub.**
 
 ## 3. Third Idea: Action Subtyping with nested state
 
 The effects (or more precisely, it's actually only one effect) are very pleasant and short. But how can we make the reducer smaller?
 
-Of course, we can! 😇 An elegant solution is to generalize the state a bit. We could understand the triple of data, status and error object as a separate entity and access it via the ES6 bracket notation `[]`.
+Of course, we can! 😇 An elegant solution is to generalize the state a bit. We could combine the three recurring objects (`data`, `status` and `error`) to a single object and access it via the ES6 bracket notation `[]`.
 
 ```ts
-export interface SubmittableItem<T> {
-  data: T[];
+export interface SubmittableItem<TData> {
+  data: TData;
   status: Status;
   error: HttpErrorResponse;
 }
@@ -544,9 +550,9 @@ const initialSubmittableItem = {
 };
 
 export interface State {
-  books: SubmittableItem<Book>;
-  authors: SubmittableItem<string>;
-  thumbnails: SubmittableItem<string>;
+  books: SubmittableItem<Book[]>;
+  authors: SubmittableItem<string[]>;
+  thumbnails: SubmittableItem<string[]>;
 }
 
 export const initialState: State = {
@@ -589,8 +595,7 @@ export const reducer = createReducer(
 );
 ```
 
-There you go. That looks a lot shorter.<!--  To be fair, it is necessary to mention that TypeScript does not check for types within the bracket notation! -->
-We can now also generilise the selectors:
+There we go. That looks a lot shorter. We can now generilise the selectors, too.
 
 ```ts
 export const selectBookState = createFeatureSelector<fromBook.State>(
@@ -613,10 +618,40 @@ export const selectItemsError = createSelector(
 );
 ```
 
-We use the additional object with the name `props`. The usage looks like this:
+For the selectors we use the additional object with the name `props`. It's usage looks like this:
 
 ```ts
 books$ = this.store.select(BookSelectors.selectItems, { kind: 'books'});
 booksStatus$ = this.store.select(BookSelectors.selectItemsStatus, { kind: 'books'});
 booksError$ = this.store.select(BookSelectors.selectItemsError, { kind: 'books'});
 ```
+
+### Conclusion
+
+By using actions with subtypes, we will have less redundant actions by definition.Furthermore, we use a nested state, so that we no longer need case distinctions. Gradually we are getting closer to the desired result.
+
+Of course we can come to a similar results by using other approaches, e.g. by composing the keys (`books`, `booksStatus`, `booksError` and so on) at runtime. 
+
+**☞ You can find [the full source code of this app](https://github.com/angular-schule/ngrx-duplicated-code/tree/master/projects/example-action-subtyping-nested) at GitHub.**
+
+## 4. Fourth Idea: Higher-order functions
+
+So far we have only shared the code within one single NgRx feature. As soon as we want to use the same logic again in another feature, we can't get very far with the shown approaches. Since everything is driven by functions, we would need some helper that creates those functions for us. To archive this, we should take a look at higher-order functions. This approach is well-known and established, even in the original Redux documentation it is described as [higher-order reducers](https://redux.js.org/recipes/structuring-reducers/reusing-reducer-logic#customizing-behavior-with-higher-order-reducers). 
+
+
+We will adapt our code to the API from the **[Entity Adapter (@ngrx/data)](https://ngrx.io/guide/entity/adapter)**.
+Here you call the method `createEntityAdapter<T>` once and then you comfortably get a number of factories, which do the work for us. In contrast to @ngrx/data we will also create actions and reducers directly. 
+
+
+
+
+Unfortunately there is currently not way to concatenate two or more string literal types to a single string literal type in TypeScript! ([see this answer on stackoverflow](https://stackoverflow.com/a/57300713)) So we can't have a type `Load Books` and extend it to `Load Books Success` without falling back to the generic `string` type.
+
+
+
+**☞ You can find [the full source code of this app](https://github.com/angular-schule/ngrx-duplicated-code/tree/master/projects/example-higher-order) at GitHub.**
+
+
+## X. @ngrx/data
+
+https://ngrx.io/guide/data
