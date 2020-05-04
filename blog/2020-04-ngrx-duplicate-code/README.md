@@ -498,7 +498,7 @@ export const reducer = createReducer(
 );
 ```
 
-Okay, that's at least a little bit shorter now, but the result is not that impressive.s
+Okay, that's at least a little bit shorter now, but the result is not that impressive.
 The biggest gain we have with the effect, here we can now remove some lines:
 
 ```ts
@@ -628,7 +628,7 @@ booksError$ = this.store.select(BookSelectors.selectItemsError, { kind: 'books'}
 
 ### Conclusion
 
-By using actions with subtypes, we will have less redundant actions by definition.Furthermore, we use a nested state, so that we no longer need case distinctions. Gradually we are getting closer to the desired result.
+By using actions with subtypes, we will have less redundant actions by definition. Furthermore, we use a nested state, so that we no longer need case distinctions. Gradually we are getting closer to the desired result.
 
 Of course we can come to a similar results by using other approaches, e.g. by composing the keys (`books`, `booksStatus`, `booksError` and so on) at runtime. 
 
