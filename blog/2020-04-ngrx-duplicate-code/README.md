@@ -417,7 +417,7 @@ Let's try it another varriation!
 
 ## 2. Second Idea: Action Subtyping
 
-Explicit actions are a fine thing, but we are getting a lot of lines of code just because we defined so many actions. Now we want to do the opposite and fight the duplicated code by using generic actions, or to be specific: actions with a subtype. And we are aware that the folowing example can be seen as anti-pattern.
+Explicit actions are a fine thing, but we are getting a lot of lines of code just because we defined so many actions. Now we want to do the opposite and fight the duplicated code by using generic actions, or to be specific: actions with a subtype. And since we have seen "Good Action Hygiene with NgRx" we are also aware that the folowing example can be seen as an anti-pattern.
 
 Such actions could look like this:
 
@@ -499,7 +499,7 @@ export const reducer = createReducer(
 ```
 
 Okay, that's at least a little bit shorter now, but the result is not that impressive.
-The biggest gain we have with the effect, here we can now remove some lines:
+The biggest gain we have with the effect, here we can now remove a bigger amount of lines:
 
 ```ts
 @Injectable()
